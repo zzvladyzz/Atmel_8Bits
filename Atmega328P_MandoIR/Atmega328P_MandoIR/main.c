@@ -105,7 +105,7 @@ int main(void)
 	InicializarSistema();
 
 	while (1) {
-		//Leemos las entradas y al ser validadas se activa el led correspondiente X tiempo
+		//Leemos las entradas y al ser validadas se activa el led correspondiente X tiempo y no entra hasta enviar la trama
 		if (rc5.flag10ms)
 		{
 			if(!pinStart.flagPin && !pinStop.flagPin && rc5.flagRC5){// esto es revisar si afecta
@@ -116,7 +116,7 @@ int main(void)
 			rc5.flag10ms=false;
 		}
 
-		// esta parte para enviar tanto el stop como el start se queda funciona
+		// Se envia lo que se tiene en el DIP de start como STOP
 		if ((pinStart.flagPin || pinStop.flagPin) && rc5.flagRC5)
 		{
 			if (pinStart.flagPin)	rc5.Command=PIND&0x0F;		
@@ -126,21 +126,41 @@ int main(void)
 			rc5.Toggle^=1;
 			
 			
-			rc5.flagRC5=false;
-			pinStart.flagPin=false;	
+			if (pinStop.flagPin && pinProg.flagPulso){
+				pinProg.flagPulso=false; //si se programo al usar stop se sale del modo
+			}
+			else{
+				rc5.flagRC5=false;	//Entra aca siempre que no este en prog asi evito mandar datos erroneos
+				activar_Timer2();		
+			}
+			pinStart.flagPin=false;
 			pinStop.flagPin=false;
-			pinProg.flagPulso=false; //esto es una prueba para ver que se quite el blink se quita se puede quitar
-			activar_Timer2();
-			
-			PORTC^=(1<<PINC4);
+
 		}
-		// esta parte se debe modificar para que al tener flagpin solo grabe lo que esta en los dip
-		// ya si se mantiene deberia mandar un rc5 maestro al robot y grabar un nuevo address
-		if (pinProg.flagPin)
+		// entrara para cambiar el addres si es necesario y programar un addres nuevo mandando un address maestro
+		// este address maestro debera estar metido en el robot
+		// se puede mejorar no solo mandando el address nuevo si no mandando comandos nuevos
+		if (pinProg.flagPin )
 		{
-			rc5.Address=PIND&0x0F;
+			if (!pinProg.flagPulso)
+			{
+				rc5.Address=PIND&0x1F; // Se lee los 5 bits de los DIP's y se guarda como adrress local
+				pinProg.flagPulso=false;
+				PORTC^=(1<<PINC3);
+			}
+			else{ //en tal caso de mantener en pulso se mandara un addres maestro para configurar la nueva direccion
+				//address master = 0x1f     y command sera para el nuevo address que debera tener el robot de 5bits
+				rc5.Address=0x1F;
+				rc5.Command=PIND&0x1F; // solo se enmascara 5 bits para evitar errores al trasmitir el nuevo address
+				
+				rc5.dataRC5=(0x03<<12)|((rc5.Toggle&0x01)<<11)|((rc5.Address&0x1F)<<6)|(rc5.Command&0x3F);
+				rc5.Toggle^=1;
+				
+				rc5.flagRC5=false;	
+				activar_Timer2();
+				PORTC^=(1<<PINC4);	
+			}
 			pinProg.flagPin=false;
-			PORTC^=(1<<PINC3);
 		}
 
 	}
@@ -219,8 +239,6 @@ void LeerEntrada(InputPin_t *P,bool PulsoLargo)
 		}
 		if ((P->contador)>9)
 		{
-			
-			
 			if(P->ValidarPulso)
 			{	
 				//En vez de validar el pin validamos el led para generar el pulso de 100ms
@@ -233,11 +251,11 @@ void LeerEntrada(InputPin_t *P,bool PulsoLargo)
 				*(P->portLED)|=P->pinLED; 
 				P->ValidarPulso=false;	
 			}
-			//Sumamos un contador extra pero solo para cuando se supere 2 seg =10ms*200
+			//Sumamos un contador extra pero solo para cuando se supere 1 seg =10ms*50
 			//y se pida un pulso largo
 			if (PulsoLargo)
 			{
-				if(valorPulso++>120)P->flagPulso=true;
+				if(valorPulso++>50)P->flagPulso=true;
 			}
 		}
 		
