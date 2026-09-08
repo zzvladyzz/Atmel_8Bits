@@ -21,8 +21,10 @@
 typedef struct
 {
 	int16_t contador;
+	uint16_t ledTime;
 	bool    ValidarPulso;
 	bool	flagPin;
+	bool    flagLed;
 	uint8_t pin;
 	volatile uint8_t * port;
 	uint8_t pinLED;
@@ -30,9 +32,9 @@ typedef struct
 	
 }InputPin_t;
 
-InputPin_t pinStart={0u,true,false,(1<<PINB3),&PINB,(1<<PORTC0),&PORTC};
-InputPin_t pinStop={0u,true,false,(1<<PINB4),&PINB,(1<<PORTC1),&PORTC};
-InputPin_t pinProg={0u,true,false,(1<<PINB0),&PINB,(1<<PORTC2),&PORTC};
+InputPin_t pinStart={0u,0u,true,false,false,(1<<PINB3),&PINB,(1<<PORTC0),&PORTC};
+InputPin_t pinStop={0u,0u,true,false,false,(1<<PINB4),&PINB,(1<<PORTC1),&PORTC};
+InputPin_t pinProg={0u,0u,true,false,false,(1<<PINB0),&PINB,(1<<PORTC2),&PORTC};
 
 /************************************************************************/
 /*      Creamos la estructura para el modulo RC5 y la inicializamos     */
@@ -51,6 +53,7 @@ typedef struct
 RC5_struct rc5={0u,0u,0u,0u,true,false};
 	
 void LeerEntrada(InputPin_t *P);
+void Salida(InputPin_t *P,uint16_t tiempo);
 void InicializarSistema();
 
 void activar_Timer2() {
@@ -101,13 +104,12 @@ int main(void)
 	InicializarSistema();
 
 	while (1) {
-	
+		//Leemos las entradas y al ser validadas se activa el led correspondiente X tiempo
 		if (rc5.flag10ms)
 		{
 			LeerEntrada(&pinStart);
 			LeerEntrada(&pinStop);
 			LeerEntrada(&pinProg);
-			
 			rc5.flag10ms=false;
 		}
 
@@ -204,9 +206,15 @@ void LeerEntrada(InputPin_t *P)
 		if ((P->contador)>9)
 		{
 			if(P->ValidarPulso)
-			{
-				P->flagPin=true;
-				*(P->portLED)^=P->pinLED;
+			{	
+				//En vez de validar el pin validamos el led para generar el pulso de 100ms
+				//para luego recien generar el flagpin
+				//P->flagPin=true;
+				P->flagLed=true;
+				//En esta linea se lee el puerto y se niega dicha salida pero se deja de usar
+				//para activar la salida del led el tiempo que se quiera dentro el timer 0
+				//*(P->portLED)^=P->pinLED; 
+				*(P->portLED)|=P->pinLED; 
 				P->ValidarPulso=false;
 			}
 		}
@@ -218,12 +226,29 @@ void LeerEntrada(InputPin_t *P)
 		P->ValidarPulso=true;
 	}
 }
+void Salida(InputPin_t *P,uint16_t tiempo)
+{
+	if (P->flagLed)
+	{
+		if(P->ledTime++>tiempo)
+		{
+			P->flagLed=false;
+			P->flagPin=true;
+			*(P->portLED)&=~P->pinLED;
+			P->ledTime=0;
+		}
+	}
+}
 ISR(TIMER0_COMPA_vect) {
 
 	static uint16_t milisegundos=0;
-
+	static uint16_t tiempoLED=20;
 	if(milisegundos++>10)
 	{
+		Salida(&pinStart,tiempoLED);
+		Salida(&pinStop,tiempoLED);
+		Salida(&pinProg,tiempoLED);
+		
 		rc5.flag10ms=true;
 		milisegundos=0;
 	}
