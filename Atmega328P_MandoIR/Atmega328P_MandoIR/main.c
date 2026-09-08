@@ -128,6 +128,8 @@ int main(void)
 			
 			if (pinStop.flagPin && pinProg.flagPulso){
 				pinProg.flagPulso=false; //si se programo al usar stop se sale del modo
+				PORTC&=~(1<<PINC3);
+				PORTC&=~(1<<PINC4);
 			}
 			else{
 				rc5.flagRC5=false;	//Entra aca siempre que no este en prog asi evito mandar datos erroneos
