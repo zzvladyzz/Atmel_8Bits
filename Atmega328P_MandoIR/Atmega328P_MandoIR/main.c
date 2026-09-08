@@ -23,6 +23,7 @@ typedef struct
 	int16_t contador;
 	uint16_t ledTime;
 	bool    ValidarPulso;
+	bool	flagPulso;
 	bool	flagPin;
 	bool    flagLed;
 	uint8_t pin;
@@ -32,9 +33,9 @@ typedef struct
 	
 }InputPin_t;
 
-InputPin_t pinStart={0u,0u,true,false,false,(1<<PINB3),&PINB,(1<<PORTC0),&PORTC};
-InputPin_t pinStop={0u,0u,true,false,false,(1<<PINB4),&PINB,(1<<PORTC1),&PORTC};
-InputPin_t pinProg={0u,0u,true,false,false,(1<<PINB0),&PINB,(1<<PORTC2),&PORTC};
+InputPin_t pinStart={0u,0u,true,false,false,false,(1<<PINB3),&PINB,(1<<PORTC0),&PORTC};
+InputPin_t pinStop={0u,0u,true,false,false,false,(1<<PINB4),&PINB,(1<<PORTC1),&PORTC};
+InputPin_t pinProg={0u,0u,true,false,false,false,(1<<PINB0),&PINB,(1<<PORTC2),&PORTC};
 
 /************************************************************************/
 /*      Creamos la estructura para el modulo RC5 y la inicializamos     */
@@ -52,8 +53,8 @@ typedef struct
 
 RC5_struct rc5={0u,0u,0u,0u,true,false};
 	
-void LeerEntrada(InputPin_t *P);
-void Salida(InputPin_t *P,uint16_t tiempo);
+void LeerEntrada(InputPin_t *P,bool PulsoLargo);
+void Salida(InputPin_t *P,uint16_t tiempo,bool blink);
 void InicializarSistema();
 
 void activar_Timer2() {
@@ -107,12 +108,15 @@ int main(void)
 		//Leemos las entradas y al ser validadas se activa el led correspondiente X tiempo
 		if (rc5.flag10ms)
 		{
-			LeerEntrada(&pinStart);
-			LeerEntrada(&pinStop);
-			LeerEntrada(&pinProg);
+			if(!pinStart.flagPin && !pinStop.flagPin && rc5.flagRC5){// esto es revisar si afecta
+				LeerEntrada(&pinStart,false);
+				LeerEntrada(&pinStop,false);
+				}
+			LeerEntrada(&pinProg,true);
 			rc5.flag10ms=false;
 		}
 
+		// esta parte para enviar tanto el stop como el start se queda funciona
 		if ((pinStart.flagPin || pinStop.flagPin) && rc5.flagRC5)
 		{
 			if (pinStart.flagPin)	rc5.Command=PIND&0x0F;		
@@ -121,16 +125,22 @@ int main(void)
 			rc5.dataRC5=(0x03<<12)|((rc5.Toggle&0x01)<<11)|((rc5.Address&0x1F)<<6)|(rc5.Command&0x3F);
 			rc5.Toggle^=1;
 			
-			activar_Timer2();
+			
 			rc5.flagRC5=false;
 			pinStart.flagPin=false;	
 			pinStop.flagPin=false;
+			pinProg.flagPulso=false; //esto es una prueba para ver que se quite el blink se quita se puede quitar
+			activar_Timer2();
+			
+			PORTC^=(1<<PINC4);
 		}
-		
+		// esta parte se debe modificar para que al tener flagpin solo grabe lo que esta en los dip
+		// ya si se mantiene deberia mandar un rc5 maestro al robot y grabar un nuevo address
 		if (pinProg.flagPin)
 		{
 			rc5.Address=PIND&0x0F;
 			pinProg.flagPin=false;
+			PORTC^=(1<<PINC3);
 		}
 
 	}
@@ -195,8 +205,12 @@ void InicializarSistema()
 	DDRD =0X00;
 	
 }
-void LeerEntrada(InputPin_t *P)
+void LeerEntrada(InputPin_t *P,bool PulsoLargo)
 {
+	//esto solo funciona para un valor ya que si se quiere un pulso largo para cada boton
+	// deberia agregar mas valores para que sea independiente
+	static uint16_t valorPulso=0u;
+	
 	if (!(*(P->port)&(P->pin)))
 	{
 		if (P->contador<=10)
@@ -205,6 +219,8 @@ void LeerEntrada(InputPin_t *P)
 		}
 		if ((P->contador)>9)
 		{
+			
+			
 			if(P->ValidarPulso)
 			{	
 				//En vez de validar el pin validamos el led para generar el pulso de 100ms
@@ -215,7 +231,13 @@ void LeerEntrada(InputPin_t *P)
 				//para activar la salida del led el tiempo que se quiera dentro el timer 0
 				//*(P->portLED)^=P->pinLED; 
 				*(P->portLED)|=P->pinLED; 
-				P->ValidarPulso=false;
+				P->ValidarPulso=false;	
+			}
+			//Sumamos un contador extra pero solo para cuando se supere 2 seg =10ms*200
+			//y se pida un pulso largo
+			if (PulsoLargo)
+			{
+				if(valorPulso++>120)P->flagPulso=true;
 			}
 		}
 		
@@ -224,20 +246,42 @@ void LeerEntrada(InputPin_t *P)
 	{
 		P->contador=0;
 		P->ValidarPulso=true;
+		if(PulsoLargo)valorPulso=0;
 	}
 }
-void Salida(InputPin_t *P,uint16_t tiempo)
+
+void Salida(InputPin_t *P,uint16_t tiempo,bool blink)
 {
+	// Genera un pulso corto al pulsar cualquier boton
 	if (P->flagLed)
 	{
 		if(P->ledTime++>tiempo)
 		{
 			P->flagLed=false;
 			P->flagPin=true;
-			*(P->portLED)&=~P->pinLED;
+			*(P->portLED)&=~(P->pinLED);
 			P->ledTime=0;
 		}
 	}
+	else{
+		if (!blink) *(P->portLED)&=~(P->pinLED);
+		// si se manda un blink parpadea el led 
+		else{
+			if (P->flagPulso)
+			{
+				if(P->ledTime++>(tiempo*3))
+				{
+					*(P->portLED)^=(P->pinLED);
+					P->ledTime=0;
+				}
+			}
+			else{
+				*(P->portLED)&=~(P->pinLED);
+				P->ledTime=0;
+			}
+		}
+	}
+
 }
 ISR(TIMER0_COMPA_vect) {
 
@@ -245,9 +289,10 @@ ISR(TIMER0_COMPA_vect) {
 	static uint16_t tiempoLED=20;
 	if(milisegundos++>10)
 	{
-		Salida(&pinStart,tiempoLED);
-		Salida(&pinStop,tiempoLED);
-		Salida(&pinProg,tiempoLED);
+		Salida(&pinStart,tiempoLED,false);
+		Salida(&pinStop,tiempoLED,false);
+		Salida(&pinProg,tiempoLED,true);
+
 		
 		rc5.flag10ms=true;
 		milisegundos=0;
@@ -263,7 +308,6 @@ ISR(TIMER2_COMPA_vect) {
 		bool ValorRC5=(rc5.dataRC5>>DesplazamientoBit)&0x01;
 		if ((Posicion&1)^ValorRC5)
 		{
-			
 			activar_PWM_Global();
 		}
 		else{
