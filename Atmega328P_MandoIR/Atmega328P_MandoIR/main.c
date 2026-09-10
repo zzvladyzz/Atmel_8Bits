@@ -161,6 +161,7 @@ int main(void)
 				rc5.flagRC5=false;	
 				activar_Timer2();
 				PORTC^=(1<<PINC4);	
+				rc5.Address=rc5.Command&0x1F;
 			}
 			pinProg.flagPin=false;
 		}
